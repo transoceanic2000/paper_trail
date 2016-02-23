@@ -1,5 +1,7 @@
 require "active_support/core_ext/object" # provides the `try` method
 require "paper_trail/attributes_serialization"
+require "paper_trail/model_config"
+require "paper_trail/record_trail"
 
 module PaperTrail
   # Extensions to `ActiveRecord::Base`.  See `frameworks/active_record.rb`.
@@ -54,122 +56,59 @@ module PaperTrail
         # symbol to be passed in.
         options[:on] = Array(options[:on])
 
-        setup_model_for_paper_trail(options)
-
+        paper_trail.setup(options)
         setup_callbacks_from_options options[:on]
       end
 
-      def setup_model_for_paper_trail(options = {})
-        # Lazily include the instance methods so we don't clutter up
-        # any more ActiveRecord models than we have to.
-        send :include, InstanceMethods
-        send :extend, AttributesSerialization
+      def paper_trail
+        ::PaperTrail::ModelConfig.new(self)
+      end
 
-        class_attribute :version_association_name
-        self.version_association_name = options[:version] || :version
+      def paper_trail_deprecate(new_method, old_method = nil)
+        old = old_method.nil? ? new_method : old_method
+        msg = format("Use paper_trail.%s instead of %s", new_method, old)
+        ::ActiveSupport::Deprecation.warn(msg, caller(2))
+      end
 
-        # The version this instance was reified from.
-        attr_accessor version_association_name
-
-        class_attribute :version_class_name
-        self.version_class_name = options[:class_name] || "PaperTrail::Version"
-
-        class_attribute :paper_trail_options
-
-        self.paper_trail_options = options.dup
-
-        [:ignore, :skip, :only].each do |k|
-          paper_trail_options[k] = [paper_trail_options[k]].flatten.compact.map { |attr|
-            attr.is_a?(Hash) ? attr.stringify_keys : attr.to_s
-          }
-        end
-
-        paper_trail_options[:meta] ||= {}
-        paper_trail_options[:save_changes] = true if paper_trail_options[:save_changes].nil?
-
-        class_attribute :versions_association_name
-        self.versions_association_name = options[:versions] || :versions
-
-        attr_accessor :paper_trail_event
-
-        # `has_many` syntax for specifying order uses a lambda in Rails 4
-        if ::ActiveRecord::VERSION::MAJOR >= 4
-          has_many versions_association_name,
-            -> { order(model.timestamp_sort_order) },
-            class_name: version_class_name, as: :item
-        else
-          has_many versions_association_name,
-            class_name: version_class_name,
-            as: :item,
-            order: paper_trail_version_class.timestamp_sort_order
-        end
-
-        # Reset the transaction id when the transaction is closed.
-        after_commit :reset_transaction_id
-        after_rollback :reset_transaction_id
-        after_rollback :clear_rolled_back_versions
+      def setup_model_for_paper_trail(*args)
+        paper_trail_deprecate "setup", "setup_model_for_paper_trail"
+        paper_trail.setup(*args)
       end
 
       def setup_callbacks_from_options(options_on = [])
-        options_on.each do |option|
-          send "paper_trail_on_#{option}"
+        options_on.each do |event|
+          paper_trail.public_send("on_#{event}")
         end
       end
 
-      # Record version before or after "destroy" event
-      def paper_trail_on_destroy(recording_order = "before")
-        unless %w(after before).include?(recording_order.to_s)
-          raise ArgumentError, 'recording order can only be "after" or "before"'
-        end
-
-        if recording_order == "after" &&
-            Gem::Version.new(ActiveRecord::VERSION::STRING) >= Gem::Version.new("5")
-          if ::ActiveRecord::Base.belongs_to_required_by_default
-            ::ActiveSupport::Deprecation.warn(
-              "paper_trail_on_destroy(:after) is incompatible with ActiveRecord " +
-                "belongs_to_required_by_default and has no effect. Please use :before " +
-                "or disable belongs_to_required_by_default."
-            )
-          end
-        end
-
-        send "#{recording_order}_destroy", :record_destroy, if: :save_version?
-
-        return if paper_trail_options[:on].include?(:destroy)
-        paper_trail_options[:on] << :destroy
+      def paper_trail_on_destroy(*args)
+        paper_trail_deprecate "on_destroy", "paper_trail_on_destroy"
+        paper_trail_on_destroy(*args)
       end
 
-      # Record version after "update" event
       def paper_trail_on_update
-        before_save :reset_timestamp_attrs_for_update_if_needed!, on: :update
-        after_update :record_update, if: :save_version?
-        after_update :clear_version_instance!
-
-        return if paper_trail_options[:on].include?(:update)
-        paper_trail_options[:on] << :update
+        paper_trail_deprecate "on_update", "paper_trail_on_update"
+        paper_trail.on_update
       end
 
-      # Record version after "create" event
       def paper_trail_on_create
-        after_create :record_create, if: :save_version?
-
-        return if paper_trail_options[:on].include?(:create)
-        paper_trail_options[:on] << :create
+        paper_trail_deprecate "on_create", "paper_trail_on_create"
+        paper_trail.on_create
       end
 
-      # Switches PaperTrail off for this class.
       def paper_trail_off!
-        PaperTrail.enabled_for_model(self, false)
+        paper_trail_deprecate "disable", "paper_trail_off!"
+        paper_trail.disable
       end
 
-      # Switches PaperTrail on for this class.
       def paper_trail_on!
-        PaperTrail.enabled_for_model(self, true)
+        paper_trail_deprecate "enable", "paper_trail_on!"
+        paper_trail.enable
       end
 
       def paper_trail_enabled_for_model?
-        return false unless include?(PaperTrail::Model::InstanceMethods)
-        PaperTrail.enabled_for_model?(self)
+        paper_trail_deprecate "enabled?", "paper_trail_enabled_for_model?"
+        paper_trail.enabled?
       end
 
       def paper_trail_version_class
@@ -180,37 +119,39 @@ module PaperTrail
     # Wrap the following methods in a module so we can include them only in the
     # ActiveRecord models that declare `has_paper_trail`.
     module InstanceMethods
-      # Returns true if this instance is the current, live one;
-      # returns false if this instance came from a previous version.
+      def paper_trail
+        ::PaperTrail::RecordTrail.new(self)
+      end
+
       def live?
-        source_version.nil?
+        self.class.paper_trail_deprecate "live?"
+        paper_trail.live?
       end
 
       # Returns who put the object into its current state.
       def paper_trail_originator
-        (source_version || send(self.class.versions_association_name).last).try(:whodunnit)
+        self.class.paper_trail_deprecate "originator", "paper_trail_originator"
+        paper_trail.originator
       end
 
       def originator
-        ::ActiveSupport::Deprecation.warn "Use paper_trail_originator instead of originator."
-        paper_trail_originator
+        self.class.paper_trail_deprecate "originator"
+        paper_trail.originator
       end
 
-      # Invoked after rollbacks to ensure versions records are not created
-      # for changes that never actually took place.
-      # Optimization: Use lazy `reset` instead of eager `reload` because, in
-      # many use cases, the association will not be used.
       def clear_rolled_back_versions
-        send(self.class.versions_association_name).reset
+        self.class.paper_trail_deprecate "clear_rolled_back_versions"
+        paper_trail.clear_rolled_back_versions
       end
 
-      # Returns the object (not a Version) as it was at the given timestamp.
-      def version_at(timestamp, reify_options = {})
-        # Because a version stores how its object looked *before* the change,
-        # we need to look for the first version created *after* the timestamp.
-        v = send(self.class.versions_association_name).subsequent(timestamp, true).first
-        return v.reify(reify_options) if v
-        self unless destroyed?
+      def source_version
+        self.class.paper_trail_deprecate "source_version"
+        paper_trail.source_version
+      end
+
+      def version_at(*args)
+        self.class.paper_trail_deprecate "version_at"
+        paper_trail.version_at(*args)
       end
 
       # Returns the objects (not Versions) as they were between the given times.
@@ -218,41 +159,38 @@ module PaperTrail
       # add a deprecation warning if someone tries to use it.
       def versions_between(start_time, end_time, _reify_options = {})
         versions = send(self.class.versions_association_name).between(start_time, end_time)
-        versions.collect { |version| version_at(version.send(PaperTrail.timestamp_field)) }
+        versions.collect { |version|
+          paper_trail.version_at(version.send(PaperTrail.timestamp_field))
+        }
       end
 
       # Returns the object (not a Version) as it was most recently.
       def previous_version
-        previous =
-          if source_version
-            source_version.previous
-          else
-            send(self.class.versions_association_name).last
-          end
-        previous.try(:reify)
+        self.class.paper_trail_deprecate "previous_version"
+        paper_trail.previous_version
       end
 
       # Returns the object (not a Version) as it became next.
       # NOTE: if self (the item) was not reified from a version, i.e. it is the
       #  "live" item, we return nil.  Perhaps we should return self instead?
       def next_version
-        subsequent_version = source_version.next
+        subsequent_version = paper_trail.source_version.next
         subsequent_version ? subsequent_version.reify : self.class.find(id)
       rescue
         nil
       end
 
       def paper_trail_enabled_for_model?
-        self.class.paper_trail_enabled_for_model?
+        self.class.paper_trail.enabled?
       end
 
       # Executes the given method or block without creating a new version.
       def without_versioning(method = nil)
         paper_trail_was_enabled = paper_trail_enabled_for_model?
-        self.class.paper_trail_off!
+        self.class.paper_trail.disable
         method ? method.to_proc.call(self) : yield(self)
       ensure
-        self.class.paper_trail_on! if paper_trail_was_enabled
+        self.class.paper_trail.enable if paper_trail_was_enabled
       end
 
       # Utility method for reifying. Anything executed inside the block will
@@ -307,10 +245,6 @@ module PaperTrail
       def will_record_after_update?
         on = paper_trail_options[:on]
         on.nil? || on.include?(:update)
-      end
-
-      def source_version
-        send self.class.version_association_name
       end
 
       def record_create
@@ -407,7 +341,7 @@ module PaperTrail
       # Invoked via callback when a user attempts to persist a reified
       # `Version`.
       def reset_timestamp_attrs_for_update_if_needed!
-        return if live?
+        return if paper_trail.live?
         timestamp_attributes_for_update_in_model.each do |column|
           # ActiveRecord 4.2 deprecated `reset_column!` in favor of
           # `restore_column!`.
@@ -450,10 +384,10 @@ module PaperTrail
 
           if assoc.options[:polymorphic]
             associated_record = send(assoc.name) if send(assoc.foreign_type)
-            if associated_record && associated_record.class.paper_trail_enabled_for_model?
+            if associated_record && associated_record.class.paper_trail.enabled?
               assoc_version_args[:foreign_key_id] = associated_record.id
             end
-          elsif assoc.klass.paper_trail_enabled_for_model?
+          elsif assoc.klass.paper_trail.enabled?
             assoc_version_args[:foreign_key_id] = send(assoc.foreign_key)
           end
 

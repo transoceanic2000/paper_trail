@@ -242,7 +242,7 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
     end
 
     should "be live" do
-      assert @widget.live?
+      assert @widget.paper_trail.live?
     end
 
     context "which is then created" do
@@ -262,7 +262,7 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
       end
 
       should "be live" do
-        assert @widget.live?
+        assert @widget.paper_trail.live?
       end
 
       should "use the widget `updated_at` as the version's `created_at`" do
@@ -317,7 +317,9 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
         end
 
         should "have versions that are not live" do
-          assert @widget.versions.map(&:reify).compact.all? { |w| !w.live? }
+          assert @widget.versions.map(&:reify).compact.all? { |w|
+            !w.paper_trail.live?
+          }
         end
 
         should "have stored changes" do
@@ -562,11 +564,11 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
 
     context "with its paper trail turned off" do
       setup do
-        Widget.paper_trail_off!
+        Widget.paper_trail.disable
         @count = @widget.versions.length
       end
 
-      teardown { Widget.paper_trail_on! }
+      teardown { Widget.paper_trail.enable }
 
       context "when updated" do
         setup { @widget.update_attributes name: "Beeblebrox" }
@@ -579,12 +581,12 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
       context 'when destroyed "without versioning"' do
         should "leave paper trail off after call" do
           @widget.without_versioning :destroy
-          assert !Widget.paper_trail_enabled_for_model?
+          assert_equal false, Widget.paper_trail.enabled?
         end
       end
 
       context "and then its paper trail turned on" do
-        setup { Widget.paper_trail_on! }
+        setup { Widget.paper_trail.enable }
 
         context "when updated" do
           setup { @widget.update_attributes name: "Ford" }
@@ -608,7 +610,7 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
           end
 
           should "enable paper trail after call" do
-            assert Widget.paper_trail_enabled_for_model?
+            assert Widget.paper_trail.enabled?
           end
         end
 
@@ -620,7 +622,7 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
           end
 
           should "enable paper trail after call" do
-            assert Widget.paper_trail_enabled_for_model?
+            assert Widget.paper_trail.enabled?
           end
         end
       end
@@ -641,9 +643,9 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
 
       should "track who made the change" do
         assert_equal "Alice", @version.whodunnit
-        assert_nil   @version.paper_trail_originator
+        assert_nil @version.paper_trail_originator
         assert_equal "Alice", @version.terminator
-        assert_equal "Alice", @widget.paper_trail_originator
+        assert_equal "Alice", @widget.paper_trail.originator
       end
 
       context "when a record is updated" do
@@ -654,10 +656,10 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
         end
 
         should "track who made the change" do
-          assert_equal "Bob",   @version.whodunnit
+          assert_equal "Bob", @version.whodunnit
           assert_equal "Alice", @version.paper_trail_originator
-          assert_equal "Bob",   @version.terminator
-          assert_equal "Bob",   @widget.paper_trail_originator
+          assert_equal "Bob", @version.terminator
+          assert_equal "Bob", @widget.paper_trail.originator
         end
 
         context "when a record is destroyed" do
@@ -669,9 +671,9 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
 
           should "track who made the change" do
             assert_equal "Charlie", @version.whodunnit
-            assert_equal "Bob",     @version.paper_trail_originator
+            assert_equal "Bob", @version.paper_trail_originator
             assert_equal "Charlie", @version.terminator
-            assert_equal "Charlie", @widget.paper_trail_originator
+            assert_equal "Charlie", @widget.paper_trail.originator
           end
         end
       end
@@ -731,7 +733,7 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
     should "should return the correct originator" do
       PaperTrail.whodunnit = "Ben"
       @foo.update_attribute(:name, "Geoffrey")
-      assert_equal PaperTrail.whodunnit, @foo.paper_trail_originator
+      assert_equal PaperTrail.whodunnit, @foo.paper_trail.originator
     end
 
     context "when destroyed" do
@@ -764,40 +766,43 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
       end
 
       should "return nil for version_at before it was created" do
-        assert_nil @widget.version_at(@created - 1)
+        assert_nil @widget.paper_trail.version_at(@created - 1)
       end
 
       should "return how it looked when created for version_at its creation" do
-        assert_equal "Widget", @widget.version_at(@created).name
+        assert_equal "Widget", @widget.paper_trail.version_at(@created).name
       end
 
       should "return how it looked before its first update" do
-        assert_equal "Widget", @widget.version_at(@first_update - 1).name
+        assert_equal "Widget", @widget.paper_trail.version_at(@first_update - 1).name
       end
 
       should "return how it looked after its first update" do
-        assert_equal "Fidget", @widget.version_at(@first_update).name
+        assert_equal "Fidget", @widget.paper_trail.version_at(@first_update).name
       end
 
       should "return how it looked before its second update" do
-        assert_equal "Fidget", @widget.version_at(@second_update - 1).name
+        assert_equal "Fidget", @widget.paper_trail.version_at(@second_update - 1).name
       end
 
       should "return how it looked after its second update" do
-        assert_equal "Digit", @widget.version_at(@second_update).name
+        assert_equal "Digit", @widget.paper_trail.version_at(@second_update).name
       end
 
       should "return the current object for version_at after latest update" do
-        assert_equal "Digit", @widget.version_at(1.day.from_now).name
+        assert_equal "Digit", @widget.paper_trail.version_at(1.day.from_now).name
       end
 
       context "passing in a string representation of a timestamp" do
         should "still return a widget when appropriate" do
           # need to add 1 second onto the timestamps before casting to a string,
           # since casting a Time to a string drops the microseconds
-          assert_equal "Widget", @widget.version_at((@created + 1.second).to_s).name
-          assert_equal "Fidget", @widget.version_at((@first_update + 1.second).to_s).name
-          assert_equal "Digit", @widget.version_at((@second_update + 1.second).to_s).name
+          assert_equal "Widget",
+            @widget.paper_trail.version_at((@created + 1.second).to_s).name
+          assert_equal "Fidget",
+            @widget.paper_trail.version_at((@first_update + 1.second).to_s).name
+          assert_equal "Digit",
+            @widget.paper_trail.version_at((@second_update + 1.second).to_s).name
         end
       end
     end
@@ -944,7 +949,8 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
     end
 
     should "return its previous self" do
-      assert_equal @widget.versions[-2].reify, @widget.previous_version
+      assert_equal @widget.versions[-2].reify,
+        @widget.paper_trail.previous_version
     end
   end
 
@@ -952,7 +958,7 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
     setup { @widget = Widget.new }
 
     should "not have a previous version" do
-      assert_nil @widget.previous_version
+      assert_nil @widget.paper_trail.previous_version
     end
 
     should "not have a next version" do
@@ -966,7 +972,8 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
       end
 
       should "have a previous version" do
-        assert_equal @widget.versions.last.reify.name, @widget.previous_version.name
+        assert_equal @widget.versions.last.reify.name,
+          @widget.paper_trail.previous_version.name
       end
 
       should "not have a next version" do
@@ -984,8 +991,10 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
     end
 
     should "have a previous version" do
-      assert_nil @second_widget.previous_version # `create` events return `nil` for `reify`
-      assert_equal @widget.versions[-2].reify.name, @last_widget.previous_version.name
+      # `create` events return `nil` for `reify`
+      assert_nil @second_widget.paper_trail.previous_version
+      assert_equal @widget.versions[-2].reify.name,
+        @last_widget.paper_trail.previous_version.name
     end
 
     should "have a next version" do
@@ -1272,7 +1281,7 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
     should "respond to `previous_version` as normal" do
       @doc.update_attributes name: "Doc 2"
       assert_equal 3, @doc.paper_trail_versions.length
-      assert_equal "Doc 1", @doc.previous_version.name
+      assert_equal "Doc 1", @doc.paper_trail.previous_version.name
     end
   end
 
@@ -1401,7 +1410,7 @@ class HasPaperTrailModelTest < ActiveSupport::TestCase
     end
 
     should "return its previous self" do
-      assert_equal @widget.versions[-2].reify, @widget.previous_version
+      assert_equal @widget.versions[-2].reify, @widget.paper_trail.previous_version
     end
   end
 

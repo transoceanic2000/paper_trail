@@ -136,7 +136,7 @@ module PaperTrail
       def reify_has_ones(transaction_id, model, options = {})
         version_table_name = model.class.paper_trail_version_class.table_name
         model.class.reflect_on_all_associations(:has_one).each do |assoc|
-          next unless assoc.klass.paper_trail_enabled_for_model?
+          next unless assoc.klass.paper_trail.enabled?
           version = model.class.paper_trail_version_class.joins(:version_associations).
             where("version_associations.foreign_key_name = ?", assoc.foreign_key).
             where("version_associations.foreign_key_id = ?", model.id).
@@ -168,7 +168,7 @@ module PaperTrail
         associations = model.class.reflect_on_all_associations(:belongs_to)
 
         associations.each do |assoc|
-          next unless assoc.klass.paper_trail_enabled_for_model?
+          next unless assoc.klass.paper_trail.enabled?
           collection_key = model.send(assoc.association_foreign_key)
 
           version = assoc.klass.paper_trail_version_class.
@@ -204,7 +204,7 @@ module PaperTrail
       def reify_has_many_directly(transaction_id, associations, model, options = {})
         version_table_name = model.class.paper_trail_version_class.table_name
         associations.each do |assoc|
-          next unless assoc.klass.paper_trail_enabled_for_model?
+          next unless assoc.klass.paper_trail.enabled?
           version_id_subquery = PaperTrail::VersionAssociation.
             joins(model.class.version_association_name).
             select("MIN(version_id)").
@@ -226,7 +226,7 @@ module PaperTrail
       # (reify_has_many_directly).
       def reify_has_many_through(transaction_id, associations, model, options = {})
         associations.each do |assoc|
-          next unless assoc.klass.paper_trail_enabled_for_model?
+          next unless assoc.klass.paper_trail.enabled?
 
           # Load the collection of through-models. For example, if `model` is a
           # Chapter, having many Paragraphs through Sections, then

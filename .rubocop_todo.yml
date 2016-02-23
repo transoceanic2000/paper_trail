@@ -3,7 +3,7 @@
 
 # Offense count: 19
 Metrics/AbcSize:
-  Max: 46 # Goal: 15
+  Max: 44 # Goal: 15
 
 # Offense count: 6
 Metrics/CyclomaticComplexity:
@@ -12,7 +12,7 @@ Metrics/CyclomaticComplexity:
 # Offense count: 2
 # Configuration parameters: CountComments.
 Metrics/ModuleLength:
-  Max: 281
+  Max: 279
 
 # Offense count: 6
 Metrics/PerceivedComplexity:
