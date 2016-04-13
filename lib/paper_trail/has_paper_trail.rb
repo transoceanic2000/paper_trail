@@ -35,6 +35,8 @@ module PaperTrail
       #   these fields will not create a new `Version`.  In addition, these
       #   fields will not be included in the serialized versions of the object
       #   whenever a new `Version` is created.
+      # - :extras - Additional non-persisted attributes that should be
+      #   be stored in the paper_trail version
       # - :meta - A hash of extra data to store. You must add a column to the
       #   `versions` table for each key. Values are objects or procs (which
       #   are called with `self`, i.e. the model with the paper trail).  See
@@ -78,7 +80,7 @@ module PaperTrail
 
         self.paper_trail_options = options.dup
 
-        [:ignore, :skip, :only].each do |k|
+        [:ignore, :skip, :only, :extras].each do |k|
           paper_trail_options[k] = [paper_trail_options[k]].flatten.compact.map { |attr|
             attr.is_a?(Hash) ? attr.stringify_keys : attr.to_s
           }
@@ -174,6 +176,10 @@ module PaperTrail
 
       def paper_trail_version_class
         @paper_trail_version_class ||= version_class_name.constantize
+      end
+
+      def paper_trail_attributes
+        column_names + paper_trail_options[:extras]
       end
     end
 
@@ -491,7 +497,9 @@ module PaperTrail
       end
 
       def attributes_before_change
-        changed = changed_attributes.select { |k, _v| self.class.column_names.include?(k) }
+        changed = changed_attributes.select { |k, _v|
+          self.class.paper_trail_attributes.include?(k)
+        }
         attributes.merge(changed)
       end
 
