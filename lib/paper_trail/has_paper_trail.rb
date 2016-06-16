@@ -507,6 +507,9 @@ module PaperTrail
       # ommitting attributes to be skipped.
       def object_attrs_for_paper_trail
         attrs = attributes_before_change.except(*paper_trail_options[:skip])
+        paper_trail_options[:extras].each do |ea|
+          attrs[ea] = self.send( ea )
+        end
         self.class.serialize_attributes_for_paper_trail!(attrs)
         attrs
       end
